@@ -1,2 +1,13 @@
-npm init -y
-npm install express axios
+{
+  "name": "video-proxy",
+  "version": "1.0.0",
+  "description": "A simple video proxy for Render",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.6.7"
+  }
+}
