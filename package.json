@@ -1,7 +1,7 @@
 {
   "name": "video-proxy",
   "version": "1.0.0",
-  "description": "A simple video proxy for Render",
+  "description": "Simple proxy to check status and cookies",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
