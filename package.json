@@ -1,13 +1,26 @@
 {
-  "name": "video-proxy",
+  "name": "cors-json-proxy",
   "version": "1.0.0",
-  "description": "Simple proxy to check status and cookies",
+  "description": "A simple CORS proxy for JSON API responses",
   "main": "server.js",
+  "type": "commonjs",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "axios": "^1.6.7"
-  }
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0"
+  },
+  "keywords": [
+    "cors",
+    "proxy",
+    "json",
+    "express"
+  ],
+  "license": "MIT"
 }
