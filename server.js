@@ -1,102 +1,92 @@
 const express = require('express');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 const cors = require('cors');
 
-// Use native fetch (Node 18+) or fall back to node-fetch
-const fetch = globalThis.fetch || require('node-fetch');
-
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
-// Allow all origins (tighten this in production)
-app.use(cors());
+// CORS setup
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-XSRF-TOKEN'],
+  credentials: false
+}));
 
-// Simple request logger
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
-  next();
+// Handle OPTIONS preflight BEFORE the proxy
+app.options('/api/*', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-XSRF-TOKEN');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.status(204).end();
 });
 
-// Health check
-app.get('/', (req, res) => {
-  res.json({
-    status: 'ok',
-    usage: 'GET /proxy?url=https://api.example.com/data',
-  });
-});
+// Health check for uptime pingers
+app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
 
-// The proxy endpoint
-// Usage: /proxy?url=https://api.example.com/data
-app.get('/proxy', async (req, res) => {
-  const targetUrl = req.query.url;
+// Dynamic proxy with SonyLIV header injection
+app.use('/api', (req, res, next) => {
+  const fullUrl = req.url.slice(1);
 
-  if (!targetUrl) {
-    return res.status(400).json({ error: 'Missing required query param: url' });
+  if (!fullUrl.startsWith('http://') && !fullUrl.startsWith('https://')) {
+    return res.status(400).json({ error: 'Invalid target URL' });
   }
 
-  // Validate URL
-  let parsed;
+  let targetOrigin, targetPath;
   try {
-    parsed = new URL(targetUrl);
-  } catch {
-    return res.status(400).json({ error: 'Invalid URL' });
+    const parsed = new URL(fullUrl);
+    targetOrigin = parsed.origin;
+    targetPath = parsed.pathname + parsed.search;
+  } catch (e) {
+    return res.status(400).json({ error: 'Malformed URL' });
   }
 
-  if (!['http:', 'https:'].includes(parsed.protocol)) {
-    return res.status(400).json({ error: 'Only http/https URLs are allowed' });
+  // Build headers: SonyLIV specific + generic browser spoof
+  const proxyHeaders = {
+    'Referer': 'https://www.sonyliv.com/',
+    'Origin': 'https://www.sonyliv.com',
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9'
+  };
+
+  // Add SonyLIV CSRF token if available via env var
+  if (process.env.SONYLIV_TOKEN) {
+    proxyHeaders['X-XSRF-TOKEN'] = process.env.SONYLIV_TOKEN;
   }
 
-  try {
-    const upstream = await fetch(targetUrl, {
-      method: 'GET',
-      headers: {
-        // Some APIs require these
-        'Accept': 'application/json',
-        'User-Agent': 'CORS-Proxy/1.0',
+  // Add SonyLIV cookie if available via env var (contains XSRF-TOKEN cookie usually)
+  if (process.env.SONYLIV_COOKIE) {
+    proxyHeaders['Cookie'] = process.env.SONYLIV_COOKIE;
+  }
+
+  const proxy = createProxyMiddleware({
+    target: targetOrigin,
+    changeOrigin: true,
+    secure: false,
+    pathRewrite: () => targetPath,
+    headers: proxyHeaders,
+    on: {
+      proxyReq: (proxyReq, req, res) => {
+        // Log for debugging — check Render logs if something fails
+        console.log(`[PROXY] ${req.method} ${targetOrigin}${targetPath}`);
       },
-    });
-
-    const contentType = upstream.headers.get('content-type') || '';
-
-    // Read the body once
-    const rawBody = await upstream.text();
-
-    // Try to parse as JSON; if it fails, return as-is
-    let payload;
-    try {
-      payload = JSON.parse(rawBody);
-    } catch {
-      // Upstream didn't return JSON — pass it through
-      res.status(upstream.status).type(contentType || 'text/plain').send(rawBody);
-      return;
+      proxyRes: (proxyRes, req, res) => {
+        console.log(`[RESPONSE] Status: ${proxyRes.statusCode}`);
+        // Ensure CORS headers even on proxied responses
+        proxyRes.headers['access-control-allow-origin'] = '*';
+      },
+      error: (err, req, res) => {
+        console.error('Proxy Error:', err.message);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Proxy failed', details: err.message });
+        }
+      }
     }
+  });
 
-    res.status(upstream.status).json(payload);
-  } catch (err) {
-    console.error('Proxy error:', err);
-    res.status(502).json({
-      error: 'Failed to fetch upstream resource',
-      message: err.message,
-    });
-  }
+  proxy(req, res, next);
 });
 
-// Fallback: proxy any path, e.g. /https://api.example.com/data
-// (optional — remove if not needed)
-app.get(/^\/(https?:\/\/.+)/, async (req, res) => {
-  const targetUrl = req.params[0] + (req.url.includes('?') ? '' : '');
-  const query = req.originalUrl.split('?')[1];
-  const fullUrl = query ? `${targetUrl}?${query}` : targetUrl;
-
-  try {
-    const upstream = await fetch(fullUrl);
-    const data = await upstream.json();
-    res.status(upstream.status).json(data);
-  } catch (err) {
-    res.status(502).json({ error: err.message });
-  }
-});
-
-app.listen(PORT, () => {
-  console.log(`CORS JSON proxy running at http://localhost:${PORT}`);
-  console.log(`Example: http://localhost:${PORT}/proxy?url=https://api.github.com/users/octocat`);
-});
+app.listen(PORT, () => console.log(`Dynamic proxy on ${PORT}`));
