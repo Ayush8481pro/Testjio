@@ -1,26 +1,13 @@
 {
-  "name": "cors-json-proxy",
+  "name": "json-fast-proxy",
   "version": "1.0.0",
-  "description": "A simple CORS proxy for JSON API responses",
   "main": "server.js",
-  "type": "commonjs",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
-  },
-  "engines": {
-    "node": ">=18.0.0"
+    "start": "node server.js"
   },
   "dependencies": {
-    "cors": "^2.8.5",
     "express": "^4.19.2",
-    "express-rate-limit": "^7.4.0"
-  },
-  "keywords": [
-    "cors",
-    "proxy",
-    "json",
-    "express"
-  ],
-  "license": "MIT"
+    "http-proxy-middleware": "^3.0.0",
+    "cors": "^2.8.5"
+  }
 }
